@@ -24,35 +24,35 @@
   failed_when: resolved_enabled.rc not in [0, 1]
   changed_when: false
 
-- name: enable systemd-resolved service
-  service:
-    name: systemd-resolved
-    enabled: yes
-    state: started
-  become: yes
-  when: resolved_enabled.rc == 1
+#- name: enable systemd-resolved service
+#  service:
+#    name: systemd-resolved
+#    enabled: yes
+#    state: started
+#  become: yes
+#  when: resolved_enabled.rc == 1
 
-- name: disable DNSStubListener
-  lineinfile:
-    path: /etc/systemd/resolved.conf
-    regexp: '^#?DNSStubListener='
-    line: DNSStubListener=no
-    mode: 0644
-  become: yes
+#- name: disable DNSStubListener
+#  lineinfile:
+#    path: /etc/systemd/resolved.conf
+#    regexp: '^#?DNSStubListener='
+#    line: DNSStubListener=no
+#    mode: 0644
+#  become: yes
 
-- name: update /etc/resolv.conf symlink
-  file:
-    src: /run/systemd/resolve/resolv.conf
-    dest: /etc/resolv.conf
-    owner: root
-    group: root
-    state: link
-    force: yes
-    mode: 0644
-  become: yes
+#- name: update /etc/resolv.conf symlink
+#  file:
+#    src: /run/systemd/resolve/resolv.conf
+#    dest: /etc/resolv.conf
+#    owner: root
+#    group: root
+#    state: link
+#    force: yes
+#    mode: 0644
+#  become: yes
 
-- name: restart systemd-resolved service
-  service:
-    name: systemd-resolved
-    state: restarted
-  become: yes
+#- name: restart systemd-resolved service
+#  service:
+#    name: systemd-resolved
+#    state: restarted
+#  become: yes

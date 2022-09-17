@@ -137,8 +137,9 @@
     force_basic_auth: yes
   register: result
   until: result.status == 200
-  retries: 180
+  retries: 18
   delay: 1
+  ignore_errors: True
 
 - name: install Python docker module
   pip:
@@ -153,11 +154,13 @@
     tls_hostname: "{{ hostvars[inventory_hostname]['ansible_hostname'] }}"
     validate_certs: yes
   when: container_runtime == "docker"
+  ignore_errors: True
 
 - name: grant access to the registry
   command: podman login --authfile="{{ registry_auth }}" -u docker -p "{{ password }}" "{{ registry_local_address }}"
   changed_when: false
   when: '"docker" not in container_runtime'
+  ignore_errors: True
 
 - name: add registry environment variable to /etc/environment
   lineinfile:
@@ -167,3 +170,4 @@
     group: root
     mode: '0644'
   when: '"docker" not in container_runtime'
+  ignore_errors: True

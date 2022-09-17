@@ -34,11 +34,12 @@
   with_items: "{{ host_vars_details.results }}"
   when: item.stat.exists
 
-- name: WA remove missing aufs-tools package from kubernetes/preinstall required_pkgs
-  lineinfile:
-    path: "{{ playbook_dir }}/kubespray/roles/kubernetes/preinstall/vars/ubuntu.yml"
-    regexp: '  - aufs-tools'
-    state: absent
-  when:
-    - (target_distribution == "Ubuntu" and target_distribution_version in  ['20.04', '22.04']) or
-      (vm_enabled and vm_image_distribution == "ubuntu" and vm_image_version_ubuntu in  ['20.04', '22.04'])
+#- name: WA remove missing aufs-tools package from kubernetes/preinstall required_pkgs
+#  lineinfile:
+#    path: "{{ playbook_dir }}/kubespray/roles/kubernetes/preinstall/vars/ubuntu.yml"
+#    regexp: '  - aufs-tools'
+#    state: absent
+#  when:
+#    - (target_distribution == "Ubuntu" and target_distribution_version in  ['20.04', '22.04']) or
+#      (vm_enabled and vm_image_distribution == "ubuntu" and vm_image_version_ubuntu in  ['20.04', '22.04'])
+#  ignore_errors: True
