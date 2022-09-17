@@ -1,0 +1,452 @@
+From 723abb6b761fb9c8dacfad96e123900ef837469d Mon Sep 17 00:00:00 2001
+From: Mah Yock Gen <yockgen@gmail.com>
+Date: Sat, 17 Sep 2022 13:28:37 +0800
+Subject: [PATCH] Hacked to make it run on KBL machine
+
+Signed-off-by: Mah Yock Gen <yockgen@gmail.com>
+---
+ credentials/kube_encrypt_token.creds         |   1 +
+ inventory.ini                                |  25 ++++
+ playbooks/basic.yml                          |  15 +++
+ playbooks/infra/basic.yml                    | 124 +++++++++++++++++++
+ playbooks/intel/basic.yml                    |  88 +++++++++++++
+ roles/bootstrap/configure_dns/tasks/main.yml |  58 ++++-----
+ roles/container_registry/tasks/main.yml      |   6 +-
+ roles/install_dependencies/tasks/main.yml    |   7 +-
+ roles/kubespray_patch/tasks/main.yml         |  17 +--
+ 9 files changed, 300 insertions(+), 41 deletions(-)
+ create mode 100644 credentials/kube_encrypt_token.creds
+ create mode 100644 inventory.ini
+ create mode 100644 playbooks/basic.yml
+ create mode 100644 playbooks/infra/basic.yml
+ create mode 100644 playbooks/intel/basic.yml
+
+diff --git a/credentials/kube_encrypt_token.creds b/credentials/kube_encrypt_token.creds
+new file mode 100644
+index 0000000..379ebd4
+--- /dev/null
++++ b/credentials/kube_encrypt_token.creds
+@@ -0,0 +1 @@
++uyC9fF3lX0Cg6CI9rUR2M2b0Bsbhj45c
+diff --git a/inventory.ini b/inventory.ini
+new file mode 100644
+index 0000000..a085593
+--- /dev/null
++++ b/inventory.ini
+@@ -0,0 +1,25 @@
++[all]
++#controller1 ansible_host=192.168.1.217 ip=192.168.1.217 ansible_user=yockgenm
++node1 ansible_host=192.168.1.217 ip=192.168.1.217 ansible_user=yockgenm 
++localhost ansible_connection=local ansible_python_interpreter=/usr/bin/python3
++
++[vm_host]
++
++[kube_control_plane]
++#controller1
++node1
++
++[etcd]
++node1
++
++[kube_node]
++node1
++
++
++[k8s_cluster:children]
++kube_control_plane
++kube_node
++
++[all:vars]
++ansible_python_interpreter=/usr/bin/python3
++
+diff --git a/playbooks/basic.yml b/playbooks/basic.yml
+new file mode 100644
+index 0000000..ab3cf64
+--- /dev/null
++++ b/playbooks/basic.yml
+@@ -0,0 +1,15 @@
++---
++- name: preflight checks
++  import_playbook: preflight.yml
++  when: preflight_enabled | default(true) | bool
++- name: configure target hosts OS layer
++  import_playbook: infra/basic.yml
++- name: deploy container runtime
++  import_playbook: infra/container_runtime_deployment.yml
++  when: not kubernetes | default(true) and container_runtime_only_deployment | default(false)
++- name: provision Kubernetes cluster using kubespray
++  import_playbook: k8s/k8s.yml
++  when: kubernetes | default(true)
++- name: install Intel Container Experience Kit features
++  import_playbook: intel/basic.yml
++  when: kubernetes | default(true)
+diff --git a/playbooks/infra/basic.yml b/playbooks/infra/basic.yml
+new file mode 100644
+index 0000000..75341a1
+--- /dev/null
++++ b/playbooks/infra/basic.yml
+@@ -0,0 +1,124 @@
++---
++# apply common cluster node configuration
++- hosts: k8s_cluster,vm_host
++  tasks: []
++  pre_tasks:
++    - name: End play for VM host
++      meta: end_host
++      when:
++        - "'vm_host' in group_names"
++        - on_vms | default(false) | bool
++  handlers:
++    - name: reboot server
++      reboot: { reboot_timeout: 1200 }
++  roles:
++    - role: cluster_defaults
++    - role: bootstrap/configure_proxy
++    - role: bootstrap/install_packages
++    - role: bootstrap/update_grub
++      when: update_kernel | default(false) | bool
++    - role: bootstrap/configure_additional_grub_parameters
++      tags: grub-extra-params
++    - role: bootstrap/configure_security
++    - role: bootstrap/apply_kubernetes_reqs
++    - role: bootstrap/configure_dns
++      when:
++        - ansible_distribution == "Ubuntu" and dns_disable_stub_listener | default(true) | bool
++        - not vm_enabled or on_vms | default(false) | bool
++    - role: bootstrap/golang_install
++      tags: golang-install
++  environment: "{{ proxy_env | d({}) }}"
++  any_errors_fatal: true
++
++# apply worker node kernel configuration
++- hosts: kube_node,vm_host
++  tasks: []
++  pre_tasks:
++    - name: End play for VM host
++      meta: end_host
++      when:
++        - "'vm_host' in group_names"
++        - on_vms | default(false) | bool
++  handlers:
++    - name: reboot server
++      reboot: { reboot_timeout: 1200 }
++  roles:
++    - role: cluster_defaults
++    - role: bootstrap/configure_hugepages
++      tags: hugepages
++      when: hugepages_enabled | default(true) | bool
++    - role: bootstrap/configure_cpu_isolation
++      when: isolcpus_enabled | default(false) | bool
++    - role: bootstrap/configure_cpusets
++      when: cpusets_enabled | default(false) | bool
++    - role: bootstrap/configure_intel_pstate
++      when: intel_pstate_enabled | default(true) | bool
++    - role: bootstrap/configure_cstates
++      when: cstate_enabled | default(false) | bool
++    - role: bootstrap/configure_ufs
++      when: ufs_enabled | default(false) | bool
++    - role: bootstrap/set_sriov_kernel_flags
++      tags: setup-sriov
++      when: iommu_enabled | default(true) | bool or on_vms | default(false) | bool
++    - role: bootstrap/set_rdt_kernel_flags
++      when: telegraf_enabled | default(true) | bool
++    - role: bootstrap/set_intel_flexran_kernel_flags
++      when: intel_flexran_enabled | default(false) | bool
++    - role: bootstrap/update_grub
++  environment: "{{ proxy_env | d({}) }}"
++  any_errors_fatal: true
++
++
++
++# install worker node network software
++- hosts: kube_node,vm_host
++  tasks: []
++  pre_tasks:
++    - name: End play for VM host
++      meta: end_host
++      when:
++        - "'vm_host' in group_names"
++        - on_vms | default(false) | bool
++  roles:
++    - role: cluster_defaults
++    - role: bootstrap/determine_dataplane_interfaces
++      when:
++        - dataplane_interfaces | default([]) | length > 0
++    - role: bootstrap/update_nic_drivers
++      tags: update-nic-drivers
++      when: update_nic_drivers | default(false) | bool
++    - role: bootstrap/update_nic_firmware
++      tags: update-nic-firmware
++      when:
++        - dataplane_interfaces | default([]) | length > 0
++        - update_nic_firmware | default(false) | bool
++        - update_nic_drivers | default(false) | bool
++  environment: "{{ proxy_env | d({}) }}"
++  any_errors_fatal: true
++
++# install DPDK and apply SRIOV configuration
++- hosts: kube_node,vm_host
++  pre_tasks:
++    - name: End play for VM host
++      meta: end_host
++      when:
++        - "'vm_host' in group_names"
++        - on_vms | default(false) | bool
++  roles:
++    - role: cluster_defaults
++    - role: install_dpdk
++      when:
++        - ovs_dpdk_enabled | default(false) | bool or install_dpdk | default(true) | bool
++      tags: dpdk
++    - role: sriov_nic_init
++      tags: setup-sriov-nic
++      when:
++        - install_dpdk | default(true) | bool
++        - iommu_enabled | default(true) | bool
++        - (kubernetes | default(true) | bool
++          and not container_runtime_only_deployment | default(false) | bool
++          and not sriov_network_operator_enabled | default(true) | bool
++          or (not kubernetes | default(true) | bool
++          and container_runtime_only_deployment | default(false) | bool))
++  environment: "{{ proxy_env | d({}) }}"
++  any_errors_fatal: true
+diff --git a/playbooks/intel/basic.yml b/playbooks/intel/basic.yml
+new file mode 100644
+index 0000000..871cee8
+--- /dev/null
++++ b/playbooks/intel/basic.yml
+@@ -0,0 +1,88 @@
++---
++- hosts: k8s_cluster
++  tasks: []
++  roles:
++    - role: cluster_defaults
++      tags: defaults
++    - role: remove_kubespray_host_dns_settings
++      tags: remove-kubespray-host-dns-settings
++      when:
++        - remove_kubespray_host_dns_settings | default(false) | bool
++    - role: nfd_install
++      tags: nfd
++      when: nfd_enabled | default(true) | bool
++    - role: operator_framework
++      tags: operator-framework
++      when:
++        - intel_ethernet_operator_enabled | default(false) | bool or
++          intel_sriov_fec_operator_enabled | default(false) | bool
++    - role: intel_ethernet_operator
++      tags: intel-ethernet-operator
++      when:
++        - intel_ethernet_operator_enabled | default(false) | bool
++    - role: sriov_dp_install
++      tags: sriov-net-dp
++      when:
++        - sriov_net_dp_enabled | default(false) | bool
++        - not sriov_network_operator_enabled | default(true) | bool
++    - role: sriov_network_operator_install
++      tags: sriov-network-operator
++      when:
++        - sriov_network_operator_enabled | default(true) | bool
++        - not sriov_net_dp_enabled | default(false) | bool
++        - not sriov_cni_enabled | default(false) | bool
++    - role: kube_prometheus
++      when:
++        - prometheus_operator | default(false) | bool
++    - role: collectd_install
++      tags: monitoring
++      when:
++        - collectd_enabled | default(false) | bool
++        - not (telegraf_enabled | default(true) | bool)
++      vars:
++        collectd_profile: basic
++    - role: telegraf_install
++      when:
++        - telegraf_enabled | default(true) | bool
++        - not (collectd_enabled | default(false) | bool)
++      tags: monitoring
++      vars:
++        telegraf_profile: basic
++    - role: cndp_install
++      tags: cndp
++      when:
++        - cndp_enabled | default(false) | bool
++        - (ansible_distribution == "Ubuntu" and ansible_distribution_version >= "20.04") or
++          (ansible_os_family == "RedHat" and ansible_distribution_version >= "8.5")
++    - role: cndp_dp_install
++      tags: cndp-dp
++      when:
++        - cndp_dp_enabled | default(false) | bool
++        - (ansible_distribution == "Ubuntu" and ansible_distribution_version >= "20.04") or
++          (ansible_os_family == "RedHat" and ansible_distribution_version >= "8.5")
++
++  environment:
++    - "{{ proxy_env | d({}) }}"
++    - REGISTRY_AUTH_FILE: "{{ registry_containerd }}"
++  any_errors_fatal: true
++
++- hosts: kube_node
++  tasks: []
++  roles:
++    - role: cluster_defaults
++      tags: defaults
++    - role: sriov_cni_install
++      when:
++        - sriov_cni_enabled | default(false) | bool
++        - not sriov_network_operator_enabled | default(true) | bool
++      tags: sriov-cni
++  environment: "{{ proxy_env | d({}) }}"
++  any_errors_fatal: true
++
++- hosts: kube_control_plane
++  tasks: []
++  roles:
++    - role: net_attach_defs_create
++      tags: net-attach-defs
++  environment: "{{ proxy_env | d({}) }}"
++  any_errors_fatal: true
+diff --git a/roles/bootstrap/configure_dns/tasks/main.yml b/roles/bootstrap/configure_dns/tasks/main.yml
+index b26d214..01bde73 100644
+--- a/roles/bootstrap/configure_dns/tasks/main.yml
++++ b/roles/bootstrap/configure_dns/tasks/main.yml
+@@ -24,35 +24,35 @@
+   failed_when: resolved_enabled.rc not in [0, 1]
+   changed_when: false
+ 
+-- name: enable systemd-resolved service
+-  service:
+-    name: systemd-resolved
+-    enabled: yes
+-    state: started
+-  become: yes
+-  when: resolved_enabled.rc == 1
++#- name: enable systemd-resolved service
++#  service:
++#    name: systemd-resolved
++#    enabled: yes
++#    state: started
++#  become: yes
++#  when: resolved_enabled.rc == 1
+ 
+-- name: disable DNSStubListener
+-  lineinfile:
+-    path: /etc/systemd/resolved.conf
+-    regexp: '^#?DNSStubListener='
+-    line: DNSStubListener=no
+-    mode: 0644
+-  become: yes
++#- name: disable DNSStubListener
++#  lineinfile:
++#    path: /etc/systemd/resolved.conf
++#    regexp: '^#?DNSStubListener='
++#    line: DNSStubListener=no
++#    mode: 0644
++#  become: yes
+ 
+-- name: update /etc/resolv.conf symlink
+-  file:
+-    src: /run/systemd/resolve/resolv.conf
+-    dest: /etc/resolv.conf
+-    owner: root
+-    group: root
+-    state: link
+-    force: yes
+-    mode: 0644
+-  become: yes
++#- name: update /etc/resolv.conf symlink
++#  file:
++#    src: /run/systemd/resolve/resolv.conf
++#    dest: /etc/resolv.conf
++#    owner: root
++#    group: root
++#    state: link
++#    force: yes
++#    mode: 0644
++#  become: yes
+ 
+-- name: restart systemd-resolved service
+-  service:
+-    name: systemd-resolved
+-    state: restarted
+-  become: yes
++#- name: restart systemd-resolved service
++#  service:
++#    name: systemd-resolved
++#    state: restarted
++#  become: yes
+diff --git a/roles/container_registry/tasks/main.yml b/roles/container_registry/tasks/main.yml
+index f8b8125..fd89cc4 100644
+--- a/roles/container_registry/tasks/main.yml
++++ b/roles/container_registry/tasks/main.yml
+@@ -137,8 +137,9 @@
+     force_basic_auth: yes
+   register: result
+   until: result.status == 200
+-  retries: 180
++  retries: 18
+   delay: 1
++  ignore_errors: True
+ 
+ - name: install Python docker module
+   pip:
+@@ -153,11 +154,13 @@
+     tls_hostname: "{{ hostvars[inventory_hostname]['ansible_hostname'] }}"
+     validate_certs: yes
+   when: container_runtime == "docker"
++  ignore_errors: True
+ 
+ - name: grant access to the registry
+   command: podman login --authfile="{{ registry_auth }}" -u docker -p "{{ password }}" "{{ registry_local_address }}"
+   changed_when: false
+   when: '"docker" not in container_runtime'
++  ignore_errors: True
+ 
+ - name: add registry environment variable to /etc/environment
+   lineinfile:
+@@ -167,3 +170,4 @@
+     group: root
+     mode: '0644'
+   when: '"docker" not in container_runtime'
++  ignore_errors: True
+diff --git a/roles/install_dependencies/tasks/main.yml b/roles/install_dependencies/tasks/main.yml
+index 265b904..3922c13 100644
+--- a/roles/install_dependencies/tasks/main.yml
++++ b/roles/install_dependencies/tasks/main.yml
+@@ -26,6 +26,7 @@
+   register: pkg_mgr_results
+   retries: 3
+   until: pkg_mgr_results is success
+-  environment:
+-    http_proxy: "{{ http_proxy }}"
+-    https_proxy: "{{ https_proxy }}"
++  #environment:
++    #http_proxy: "{{ http_proxy }}"
++    #https_proxy: "{{ https_proxy }}"
++    #ignore_errors: True
+diff --git a/roles/kubespray_patch/tasks/main.yml b/roles/kubespray_patch/tasks/main.yml
+index 10d8bbd..6153401 100644
+--- a/roles/kubespray_patch/tasks/main.yml
++++ b/roles/kubespray_patch/tasks/main.yml
+@@ -34,11 +34,12 @@
+   with_items: "{{ host_vars_details.results }}"
+   when: item.stat.exists
+ 
+-- name: WA remove missing aufs-tools package from kubernetes/preinstall required_pkgs
+-  lineinfile:
+-    path: "{{ playbook_dir }}/kubespray/roles/kubernetes/preinstall/vars/ubuntu.yml"
+-    regexp: '  - aufs-tools'
+-    state: absent
+-  when:
+-    - (target_distribution == "Ubuntu" and target_distribution_version in  ['20.04', '22.04']) or
+-      (vm_enabled and vm_image_distribution == "ubuntu" and vm_image_version_ubuntu in  ['20.04', '22.04'])
++#- name: WA remove missing aufs-tools package from kubernetes/preinstall required_pkgs
++#  lineinfile:
++#    path: "{{ playbook_dir }}/kubespray/roles/kubernetes/preinstall/vars/ubuntu.yml"
++#    regexp: '  - aufs-tools'
++#    state: absent
++#  when:
++#    - (target_distribution == "Ubuntu" and target_distribution_version in  ['20.04', '22.04']) or
++#      (vm_enabled and vm_image_distribution == "ubuntu" and vm_image_version_ubuntu in  ['20.04', '22.04'])
++#  ignore_errors: True
+-- 
+2.34.1
+
