@@ -1,4 +1,2 @@
 *.retry
 *.pyc
-/host_vars/
-/group_vars/

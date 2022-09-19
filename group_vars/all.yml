@@ -1,0 +1,198 @@
+---
+## Container Experience Kits (CEK) primary playbook variables ##
+# Do not change profile_name and configured_arch here!
+# To generate vars for different profile/architecture use make command
+# At present, the profile and arch generated are as follows
+profile_name: basic
+configured_arch: icx
+
+# CEK project directory on all nodes
+project_root_dir: /opt/cek/
+
+vm_enabled: false
+# vm_mode can't be enabled manually here
+# To enable it, vm specific configuration from examples/vm need to be taken
+
+# Kubernetes version
+kubernetes: true
+kube_version: v1.23.4
+#kube_version: v1.22.3
+#kube_version: v1.21.5
+# To deploy only container runtime set this variable as "true", and kubernetes as "false"
+# Set both variables as "false" to perform only host configuration
+container_runtime_only_deployment: false
+
+# Kubernetes container runtime: docker, containerd, crio
+# When "crio" is set, please enable "crio_registries" section
+container_runtime: docker
+
+# Preflight will check vars configuration
+# It is NOT recommended to disable preflight, unless it is a conscious decision
+preflight_enabled: true
+
+# Run system-wide package update (apt dist-upgrade, yum update, ...)
+# Note: enabling this may lead to unexpected results
+# Tip: you can set this per host using host_vars
+update_all_packages: false
+update_kernel: false
+
+# Add arbitrary parameters to GRUB
+additional_grub_parameters_enabled: false
+additional_grub_parameters: ""
+
+# SELinux configuration state: current, enabled, disabled
+selinux_state: current
+
+# Node Feature Discovery
+nfd_enabled: true
+nfd_build_image_locally: false
+nfd_namespace: kube-system
+nfd_sleep_interval: 60s
+
+# Kubernetes Dashboard
+kube_dashboard_enabled: true
+
+# Enable Kubernetes built-in Topology Manager
+topology_manager_enabled: true
+# There are four supported policies: none, best-effort, restricted, single-numa-node.
+topology_manager_policy: "best-effort"
+
+# OpenShift SRIOV Network Operator
+sriov_network_operator_enabled: false
+# For VM mode sriov_network_operator_enabled has to be false, otherwise VFs
+# are not created before VM creation
+sriov_network_operator_namespace: "sriov-network-operator"
+
+# Intel SRIOV Network Device Plugin
+sriov_net_dp_enabled: false
+sriov_net_dp_namespace: kube-system
+# whether to build and store image locally or use one from public external registry
+sriov_net_dp_build_image_locally: false
+# SR-IOV network device plugin configuration.
+# For more information on supported configuration refer to: https://github.com/intel/sriov-network-device-plugin#configurations
+sriovdp_config_data: |
+    {
+        "resourceList": [{
+                "resourceName": "intel_sriov_netdevice",
+                "selectors": {
+                    "vendors": ["8086"],
+                    "devices": ["154c", "10ed", "1889"],
+                    "drivers": ["iavf", "ixgbevf"]
+                }
+            },
+            {
+                "resourceName": "intel_sriov_dpdk_700_series",
+                "selectors": {
+                    "vendors": ["8086"],
+                    "devices": ["154c", "10ed"],
+                    "drivers": ["vfio-pci"]
+                }
+            },
+            {
+                "resourceName": "intel_sriov_dpdk_800_series",
+                "selectors": {
+                    "vendors": ["8086"],
+                    "devices": ["1889"],
+                    "drivers": ["vfio-pci"]
+                }
+            }
+        ]
+    }
+
+# Intel Ethernet Operator for Intel E810 Series network interface cards
+intel_ethernet_operator_enabled: false
+intel_ethernet_operator_flow_config_enabled: false
+
+
+# Telemetry configuration. Collectd and Telegraf variables are mutually exclusive.
+prometheus_operator: true
+collectd_enabled: false
+telegraf_enabled: true
+collectd_scrap_interval: 30
+telegraf_scrap_interval: 30
+
+# Create reference net-attach-def objects
+example_net_attach_defs:
+  sriov_net_dp: false # update to match host_vars CNI configuration
+
+firewall_enabled: false
+
+## Proxy configuration ##
+#http_proxy: "http://proxy.example.com:1080"
+#https_proxy: "http://proxy.example.com:1080"
+#additional_no_proxy: ".example.com,mirror_ip"  # no need to include the following (will be added automatically): localhost, 127.0.0.1, controllerIPs, nodesIPs
+
+# (Ubuntu only) disables DNS stub listener which may cause issues on Ubuntu
+dns_disable_stub_listener: true
+
+# Remove the block between ansible markers set by kubespray in dhclient & hosts files to avoid DNS & LDAP issues (connection loss) after K8s setup after reboot
+remove_kubespray_host_dns_settings: true
+
+# Kubernetes cluster name, also will be used as DNS domain
+cluster_name: cluster.local
+
+## Kubespray variables ##
+
+# Supported network plugins(calico, flannel) and kube-proxy configuration
+kube_controller_manager_bind_address: 127.0.0.1
+kube_proxy_metrics_bind_address: 127.0.0.1
+# supported network plugins(calico, flannel) and kube-proxy configuration
+kube_network_plugin: calico
+# Supported calico backend: [vxlan, bird]
+calico_network_backend: bird
+# Advanced calico options
+# https://github.com/kubernetes-sigs/kubespray/blob/master/docs/calico.md
+# if set to 'true', variables defined by user will be used and default CEK configuration will be ignored
+calico_advanced_options: false
+wireguard_enabled: true
+kube_network_plugin_multus: true
+kube_pods_subnet: 10.244.0.0/16
+kube_service_addresses: 10.233.0.0/22
+kube_proxy_mode: iptables
+
+# Set on true if you want to enable the eBPF dataplane support
+calico_bpf_enabled: false
+
+# Set this var to true if you want to expose calico metrics endpoint
+calico_metrics_enabled: false
+
+# Comment this line out if you want to expose k8s services of type nodePort externally.
+kube_proxy_nodeport_addresses_cidr: 127.0.0.0/8
+
+# Local Docker Hub mirror, if it exists
+#docker_registry_mirrors:
+#  - http://mirror_ip:mirror_port
+#docker_insecure_registries:
+#  - http://docker_insecure_registry_ip
+#containerd_registries:
+#  "docker.io":
+#    - "https://registry-1.docker.io"
+#    - "http://mirror_ip:mirror_port"
+#crio_registries:
+#  - prefix: docker.io
+#    insecure: false
+#    blocked: false
+#    location: registry-1.docker.io
+#    unqualified: true
+#    mirrors:
+#      - location: mirror_ip:mirror_port
+#        insecure: false
+#crio_insecure_registries:
+#  - http://crio_insecure_registry_ip
+
+# Docker registry running on the cluster allows us to store images not available on Docker Hub
+# The range of valid ports is 30000-32767
+registry_enable: true
+registry_nodeport: "30500"
+registry_local_address: "localhost:{{ registry_nodeport }}"
+cert_manager_enable: true
+
+# Enable Pod Security Policy. This option enables PSP admission controller and creates minimal set of rules.
+psp_enabled: true
+
+# Set image pull policy to Always. Pull images prior to starting containers. Valid credentials must be configured.
+always_pull_enabled: false
+
+# Intel Cloud Native Data Plane.
+cndp_dp_enabled: false
+cndp_net_attach_def_enabled: false

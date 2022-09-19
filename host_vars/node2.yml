@@ -1,0 +1,121 @@
+---
+# Kubernetes node configuration
+# Do not change profile_name, configured_nic and configured_arch here !!!
+# To generate vars for different profile/architecture use make command
+# generated for profile and arch:
+profile_name: basic
+configured_arch: icx
+configured_nic: fvl
+
+# Enable IOMMU (required for SR-IOV networking and QAT)
+iommu_enabled: false
+
+# Set to 'true' to update i40e, ice and iavf kernel modules
+update_nic_drivers: true
+# Set 'true' to update NIC firmware
+update_nic_firmware: false # FW update will be executed on all NICs listed in "dataplane_interfaces[*].name"
+
+# dataplane interface configuration list
+#dataplane_interfaces: []
+#  - bus_info: "18:00.0"                    # pci bus info
+#    pf_driver: i40e                         # PF driver, "i40e", "ice"
+#    flow_configuration: false              # Flow Configuration # NOTE: this option is for Intel E810 Series NICs and requires Intel Ethernet Operator and Flow Config to be enabled in group vars.
+                                            # with Flow Configuration enabled the first VF (VF0) will be reserved for Flow Configuration and the rest of VFs will be indexed starting from 1.
+
+#    default_vf_driver: "iavf"              # default driver to be used with VFs if specific driver is not defined in the "sriov_vfs" section
+#    sriov_numvfs: 6                        # total number of VFs to create including VFs listed in the "sriov_vfs" section.
+                                            # If total number of VFs listed in the "sriov_vfs" section is greater than "sriov_numvfs" then excessive entities will be ignored.
+                                            # VF's name should follow scheme: <arbitrary_vf_name>_<zero_started_index_of_vf>
+                                            # If index in the VF's name is greater than "sriov_numfs - 1" such VF will be ignored.
+#    sriov_vfs:                             # list of VFs to create on this PF with specific driver
+#      vf_00: "vfio-pci"                    # VF driver to be attached to this VF under this PF. Options: "iavf", "vfio-pci", "igb_uio"
+#      vf_05: "vfio-pci"
+
+#  - bus_info: "18:00.1"
+#    pf_driver: i40e
+#    default_vf_driver: "vfio-pci"
+#    flow_configuration: false
+
+#    sriov_numvfs: 4
+#    sriov_vfs: {}                   # no VFs with specific driver on this PF or "sriov_vfs" can be omitted for convenience
+
+dataplane_interfaces:
+ - bus_info: "00:1f.6"
+   pf_driver: e1000e
+   default_vf_driver: "vfio-pci"
+   flow_configuration: false
+
+   sriov_numvfs: 0
+   sriov_vfs: {}
+
+sriov_cni_enabled: false
+
+# Custom SriovNetworkNodePolicy manifests local path
+# custom_sriov_network_policies_dir: /tmp/sriov
+# Install DPDK (required for SR-IOV networking)
+install_dpdk: true
+# DPDK version (will be in action if install_dpdk: true)
+dpdk_version: "22.03"
+# Custom DPDK patches local path
+#dpdk_local_patches_dir: "/tmp/patches/dpdk"
+# It might be necessary to adjust the patch strip parameter, update as required.
+#dpdk_local_patches_strip: 0
+
+# Enables hugepages support
+hugepages_enabled: true
+# Hugepage sizes available: 2M, 1G
+default_hugepage_size: 1G
+# Sets how many hugepages should be created
+number_of_hugepages_1G: 4
+number_of_hugepages_2M: 1024
+
+# Intel Ethernet Operator for Intel E810 Series network interface cards
+intel_ethernet_operator:
+  fw_update: false                     # perform firmware update on PFs listed in dataplane_interfaces
+  # NodeFlowConfig manifests local path
+  # For more information refer to:
+  # https://github.com/intel/intel-ethernet-operator/blob/main/docs/flowconfig-daemon/creating-rules.md
+  # node_flow_config_dir: /tmp/node_flow_config
+
+# CPU isolation from Linux scheduler
+isolcpus_enabled: false
+isolcpus: "4-11"
+
+# CPU shielding
+cpusets_enabled: false
+cpusets: "4-11"
+
+cstate_enabled: false
+cstates:
+  C1: # default values: C6 for access, C1 for other profiles
+    cpu_range: '0-9' # change as needed, cpus to modify cstates on
+    enable: true # true - enable given cstate, false - disable given cstate
+
+ufs_enabled: false
+ufs: # uncore frequency scaling
+  min: 1000 # minimal uncore frequency
+  max: 2000 # maximal uncore frequency
+
+# Telemetry configuration
+# intel_pmu plugin collects information provided by Linux perf interface.
+enable_intel_pmu_plugin: false
+
+# CPU Threads to be monitored by Intel PMU Plugin.
+# If the field is empty, all available cores will be monitored.
+# Please refer to https://collectd.org/wiki/index.php/Plugin:Intel_PMU for configuration details.
+intel_pmu_plugin_monitored_cores: ""
+
+# CPU Threads to be monitored by Intel RDT Plugin.
+# If the field is empty, all available cores will be monitored.
+# Please refer to https://collectd.org/wiki/index.php/Plugin:IntelRDT for configuration details.
+intel_rdt_plugin_monitored_cores: ""
+
+# Additional list of plugins that will be excluded from collectd deployment.
+exclude_collectd_plugins: []
+
+# Intel Cloud Native Data Plane.
+cndp_enabled: false
+cndp_dp_pools:
+  - name: "e2e"
+    drivers: "{{ dataplane_interfaces | map(attribute='pf_driver') | list | unique }}"   # List of NIC driver to be included in CNDP device plugin ConfigMap.
+
