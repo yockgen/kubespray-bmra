@@ -1,0 +1,332 @@
+Networking env
+================
+//kbl02
+ifconfig eno1 192.168.10.10 netmask 255.255.255.0 up
+
+//kbl01
+ifconfig eno1 192.168.10.11 netmask 255.255.255.0 up
+
+//enable passwordless ssh for ansible
+ssh-keygen -t rsa
+ssh-copy-id -i /root/.ssh/id_rsa yockgenm@192.168.1.217
+ssh-copy-id -i /root/.ssh/id_rsa yockgenm@192.168.1.161
+
+ssh-copy-id -i /home/yockgenm/.ssh/id_rsa yockgenm@192.168.1.217
+ssh-copy-id -i /home/yockgenm/.ssh/id_rsa yockgenm@192.168.1.161
+
+
+=======================================================================================================================================
+//get master branch for this case, date download 17/09/2022
+git clone  https://github.com/intel/container-experience-kits.git
+git submodule update --init
+
+//ansilbe and dependecies 
+pip3 install -r requirements.txt
+
+//testing
+export PROFILE=basic
+
+
+//genarate profile
+make clean 
+make k8s-profile PROFILE=${PROFILE} ARCH=icx NIC=fvl
+
+
+//update ip
+nano inventory.ini
+[all]
+controller1 ansible_host=192.168.1.217 ip=192.168.1.217 ansible_user=yockgenm
+node1 ansible_host=192.168.1.161 ip=192.168.1.161 ansible_user=yockgenm 
+node2 ansible_host=192.168.1.217 ip=192.168.1.217 ansible_user=yockgenm 
+localhost ansible_connection=local ansible_python_interpreter=/usr/bin/python3
+
+[vm_host]
+
+[kube_control_plane]
+controller1
+
+[etcd]
+controller1
+
+[kube_node]
+node1
+node2
+
+[k8s_cluster:children]
+kube_control_plane
+kube_node
+
+[all:vars]
+ansible_python_interpreter=/usr/bin/python3
+
+
+
+//patch kubespray
+ansible-playbook -i inventory.ini playbooks/k8s/patch_kubespray.yml
+
+//build
+ansible-playbook -i inventory.ini playbooks/${PROFILE}.yml --become --become-user=root
+ --ask-become-pass
+
+===============================================================================================================================================
+Issue 1
+=======
+All assertions passed
+failed: [localhost] (item={'changed': False, 'stat': {'exists': False}, 'invocation': {'module_args': {'path': '/data/container-experience-kits/host_vars/node2.yml', 'follow': False, 'get_md5': False, 'get_checksum': True, 'get_mime': True, 'get_attributes': True, 'checksum_algorithm': 'sha1'}}, 'failed': False, 'item': 'node2', 'ansible_loop_var': 'item'}) => {
+    "ansible_loop_var": "item",
+    "assertion": "item.stat.exists and item.stat.isreg",
+    "changed": false,
+    "evaluated_to": false,
+    "item": {
+        "ansible_loop_var": "item",
+        "changed": false,
+        "failed": false,
+        "invocation": {
+            "module_args": {
+                "checksum_algorithm": "sha1",
+                "follow": false,
+                "get_attributes": true,
+                "get_checksum": true,
+                "get_md5": false,
+                "get_mime": true,
+                "path": "/data/container-experience-kits/host_vars/node2.yml"
+            }
+        },
+        "item": "node2",
+        "stat": {
+            "exists": false
+        }
+    }
+}
+
+MSG:
+
+File host_vars/node2.yml does NOT exist. Must be created per Guide
+
+
+//solution
+cp node1.yml node2.yml
+
+Issue 2
+=======
+nano ./host_vars/node1.yml
+
+Dataplane (DP) interface(s) defined in host_vars = []
+
+TASK [check DP Interfaces] ******************************************************************************************************************************************************************************************************************
+fatal: [node1]: FAILED! => {
+    "assertion": "dataplane_interfaces != []",
+    "changed": false,
+    "evaluated_to": false
+}
+
+MSG:
+
+Dataplane (DP) interface(s) on target 'kbl02' must be set in host_vars. Please correct the configuration
+fatal: [node2]: FAILED! => {
+    "assertion": "dataplane_interfaces != []",
+    "changed": false,
+    "evaluated_to": false
+}
+
+MSG:
+
+Dataplane (DP) interface(s) on target 'kbl01' must be set in host_vars. Please correct the configuration
+
+
+//solution
+//kbl02
+
+nano +19 ./host_vars/node1.yml
+
+00:1f.6 Ethernet controller: Intel Corporation Ethernet Connection (4) I219-V (rev 2
+
+dataplane_interfaces:  
+ - bus_info: "00:1f.6"
+   pf_driver: e1000e
+   default_vf_driver: "vfio-pci"
+   flow_configuration: false
+
+   sriov_numvfs: 0 <--importnay
+   sriov_vfs: {}                   
+
+//kbl01
+00:1f.6 Ethernet controller: Intel Corporation Ethernet Connection (4) I219-V (rev 21)
+dataplane_interfaces:
+  - bus_info: "00:1f.6"
+    sriov_numvfs: 0
+    default_vf_driver: "e1000e"
+    pf_driver: e1000e
+    sriov_vfs: []
+
+Issue 3
+=======
+TASK [regather network facts in case hostname recently changed] *****************************************************************************************************************************************************************************
+fatal: [node1]: FAILED! => {}
+
+MSG:
+
+Missing sudo password
+fatal: [controller1]: FAILED! => {}
+
+MSG:
+
+Missing sudo password
+fatal: [node2]: FAILED! => {}
+
+MSG:
+
+Missing sudo password
+
+//solution
+ansible-playbook -i inventory.ini playbooks/basic.yml --become --become-user=root --ask-become-pass
+
+For passwordless sudo access, you can modify /etc/sudoers.
+# Allow members of group sudo to execute any command
+%sudo   ALL=(ALL:ALL) ALL
+yockgenm  ALL=(ALL:ALL) NOPASSWD:ALL # <--Add this line, replacing <user> with your username
+
+Issue 4
+=======
+Failed to lock apt for exclusive operation: Failed to lock directory /var/lib/apt/lists/
+
+//solution on the 
+nano +91 ./playbooks/k8s/roles/bootstrap/install_packages/tasks/debian.yml
+- update_cache: no <-change yes to no, seach all in the file (total 3+ of them)
+
+nano ./playbooks/k8s/roles/install_dependencies/tasks/main.yml
+- update_cache: no
+
+
+Issue 5
+=======
+fatal: [controller1]: FAILED! => {
+    "changed": false,
+    "cmd": "/usr/bin/update-alternatives --install /usr/bin/python python /usr/bin/python3 50",
+    "rc": 2
+}
+
+STDOUT:
+
+update-alternatives: using /usr/bin/python3 to provide /usr/bin/python (python) in auto mode
+
+
+
+STDERR:
+
+update-alternatives: error: unable to install '/var/lib/dpkg/alternatives/python.dpkg-tmp' as '/var/lib/dpkg/alternatives/python': No such file or directory
+
+
+
+MSG:
+
+update-alternatives: error: unable to install '/var/lib/dpkg/alternatives/python.dpkg-tmp' as '/var/lib/dpkg/alternatives/python': No such file or directory
+
+//solution
+commented below as both nodes already python3 - obsolete checking
+
+Issue 6
+=======
+TASK [bootstrap/apply_kubernetes_reqs : disable swap usage] *********************************************************************************************************************************************************************************
+fatal: [node1]: FAILED! => {
+    "changed": false,
+    "cmd": [
+        "swapoff",
+        "-a"
+    ],
+    "delta": "0:00:00.002337",
+    "end": "2022-09-15 15:03:01.042214",
+    "rc": 32,
+    "start": "2022-09-15 15:03:01.039877"
+}
+
+MSG:
+
+non-zero return code
+
+
+//solution
+nano +32 ./playbooks/k8s/roles/bootstrap/apply_kubernetes_reqs/tasks/main.yml
+ignore_errors: True
+  
+Issue 6
+=======
+http_proxy not set
+
+//solution
+nano +22 ./playbooks/k8s/roles/install_dependencies/tasks/main.yml
+disable proxy if behind proxy
+
+Issue 7
+======
+/usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes -o 'go-template={{ range .items }}{{ .metadata.name }}{{ \"\\n\" }}{{ end }}'
+kubectl not found error
+--/usr/local/bin/kubectl 
+
+//solution
+ln -s /usr/bin/kubectl /usr/local/bin/kubectl
+ln -s /usr/local/bin/ansible-playbook /usr/bin/ansible-playbook
+delete /usr/bin/ansible-playbook
+ln -s /snap/bin/kubectl /usr/local/bin/kubectl
+Issue 8
+======
+FAILED - RETRYING: install build-essential package (5 retries left).
+FAILED - RETRYING: install build-essential package (4 retries left).
+FAILED - RETRYING: install build-essential package (3 retries left).
+FAILED - RETRYING: install build-essential package (2 retries left).
+FAILED - RETRYING: install build-essential package (1 retries left).
+
+TASK [bootstrap/install_packages : install build-essential package] *************************************************************************************************************************************************************************
+fatal: [node1]: FAILED! => {
+    "attempts": 5,
+    "changed": false
+}
+
+MSG:
+
+Failed to update apt cache: unknown reason
+
+//solution
+root@KBL02:/data/container-experience-kits# nano +46 ./playbooks/k8s/roles/bootstrap/install_packages/tasks/debian.yml
+
+
+issue 9
+========
+apt-cache issue
+
+//solution
+replace good /etc/apt/source.list (typically us archive), and test with following: 
+
+https://askubuntu.com/questions/124017/how-do-i-restore-the-default-repositories
+
+isssue 10
+==========
+node2 not showing, if existing k8s node, couple of cleaning needed to join new cluster
+
+//solution
+
+-systemctl enable kubelet.service
+-copy over kubeadm from working node
+
+//master/control
+kubectl drain kbl01 --ignore-daemonsets --delete-local-data
+kubectl delete node kbl01
+
+//CAREFUL!!!!worker node
+/usr/local/bin/kubeadm reset //--cri-socket /var/run/containerd/containerd.sock
+rm -rf /etc/cni/net.d/*
+rm -rf $HOME/.kube/*
+rm -rf /etc/kubernetes/kubelet.conf
+rm -rf /etc/kubernetes/pki/ca.crt
+
+rm /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+netstat -lnp | grep 10250
+kill 37953
+
+
+//rejoin
+/usr/local/bin/kubeadm join 192.168.1.217:6443 --token qdkyf5.nauot0mc0akuh54w --discovery-token-ca-cert-hash sha256:b63ac1a3d5ca3586f39ba8394d141bea0d813fc9f8d70b1eb61447dcf03e1259 \
+		--cri-socket /var/run/containerd/containerd.sock
+
+/usr/local/bin/kubeadm join 192.168.1.217:6443 --token qdkyf5.nauot0mc0akuh54w --discovery-token-ca-cert-hash sha256:b63ac1a3d5ca3586f39ba8394d141bea0d813fc9f8d70b1eb61447dcf03e1259 \
+		--cri-socket /var/run/crio/crio.sock
